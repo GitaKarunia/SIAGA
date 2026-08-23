@@ -470,16 +470,22 @@
   // Taruh file-file ini di folder data/ (nama harus persis, atau ubah
   // path di bawah kalau nama filemu beda):
   var BOUNDARY_PATH = 'data/PulangPisau_Boundary.geojson';
-  var DESA_PATH      = 'data/batas_desa.geojson';
+  var DESA_PATH      = 'data/Batas desa.RBI.geojson'; // nama file ada spasi, di-encode saat fetch (lihat di bawah)
   var ZONES_PATH     = 'data/PulangPisau_RecurrenceZone_Vector.geojson';
   var FREQ_RASTER_PATH = 'data/raster/PulangPisau_FireFrequency_2019_2025_web.tif';
 
-  // Daftar peta layout yang bisa diunduh -- TAMBAHKAN entri di sini begitu
-  // kamu punya nama file layout petanya. Taruh file PDF/PNG-nya di folder
-  // data/peta/, lalu tambah objek baru: {title, desc, filename}
+  // Daftar peta layout yang bisa diunduh. Taruh file PDF/PNG-nya di folder
+  // data/peta/ dengan nama file PERSIS seperti di bawah.
   var PETA_LAYOUTS = [
-    // Contoh (hapus tanda komentar & sesuaikan setelah file layout siap):
-    // { title: 'Peta Zona Kambuhan', desc: 'Layout A3, siap cetak/lampiran laporan.', filename: 'peta_zona_kambuhan.pdf' },
+    { title: 'Zona Kambuhan Kebakaran', desc: 'Peta utama: klasifikasi Aman, Pernah Terbakar, dan Zona Kambuhan periode 2019\u20132025.', filename: 'peta_zona_kambuhan.pdf' },
+    { title: 'Frekuensi Kebakaran', desc: 'Jumlah kejadian terbakar per lokasi selama periode 2019\u20132025 (skala 0\u20136 kali).', filename: 'peta_frekuensi_kebakaran.pdf' },
+    { title: 'NBR Tahun 2019', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2019.', filename: 'peta_nbr_2019.pdf' },
+    { title: 'NBR Tahun 2020', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2020.', filename: 'peta_nbr_2020.pdf' },
+    { title: 'NBR Tahun 2021', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2021.', filename: 'peta_nbr_2021.pdf' },
+    { title: 'NBR Tahun 2022', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2022.', filename: 'peta_nbr_2022.pdf' },
+    { title: 'NBR Tahun 2023', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2023.', filename: 'peta_nbr_2023.pdf' },
+    { title: 'NBR Tahun 2024', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2024.', filename: 'peta_nbr_2024.pdf' },
+    { title: 'NBR Tahun 2025', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2025.', filename: 'peta_nbr_2025.pdf' }
   ];
 
   var COLORS = { 0: '#4c9a5b', 1: '#e0a83f', 2: '#c1432e' };
@@ -529,18 +535,18 @@
     })
     .catch(function() { showStatus('Belum ketemu data/PulangPisau_Boundary.geojson.'); });
 
-  fetch(DESA_PATH)
+  fetch(encodeURI(DESA_PATH))
     .then(function(r) { if (!r.ok) throw new Error('not found'); return r.json(); })
     .then(function(geojson) {
       L.geoJSON(geojson, {
-        style: { color: '#ff8a3d', weight: 1, fillOpacity: 0, dashArray: '2 3' },
+        style: { color: '#ff8a3d', weight: 1, fillOpacity: 0.02, fillColor: '#ff8a3d', dashArray: '2 3' },
         onEachFeature: function(feature, lyr) {
           var nameProp = feature.properties.NAMOBJ || feature.properties.nama_desa || feature.properties.name || 'Desa';
           lyr.bindTooltip(nameProp, { sticky: true });
         }
       }).addTo(desaLayer);
     })
-    .catch(function() { /* opsional -- diam saja kalau belum ada, layer-nya memang default mati */ });
+    .catch(function() { showStatus('Belum ketemu data/' + DESA_PATH.split('/').pop() + '.'); });
 
   fetch(ZONES_PATH)
     .then(function(r) { if (!r.ok) throw new Error('not found'); return r.json(); })
