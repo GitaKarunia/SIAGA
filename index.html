@@ -150,10 +150,22 @@
   /* ---------- PETA ---------- */
   #peta-wrap{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;height:640px;}
   #map{width:100%;height:100%;background:#0c0805;}
+  #map-panel-toggle{
+    position:absolute;top:16px;left:16px;z-index:600;
+    display:none;align-items:center;gap:7px;
+    font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em;
+    background:rgba(20,13,10,.92);color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:9px 14px;cursor:pointer;
+  }
   #map-panel{
     position:absolute;top:16px;left:16px;z-index:500;width:270px;max-height:calc(100% - 32px);
     background:rgba(20,13,10,.88);backdrop-filter:blur(6px);border:1px solid var(--line);
     border-radius:8px;padding:16px 16px 8px;overflow-y:auto;
+  }
+  #map-panel-close{
+    display:none;position:absolute;top:10px;right:12px;background:none;border:none;
+    color:var(--ash);font-size:20px;line-height:1;cursor:pointer;
   }
   #map-panel h3{
     font-family:'Barlow Condensed',sans-serif;font-size:14px;text-transform:uppercase;
@@ -194,10 +206,11 @@
     display:flex;flex-direction:column;
   }
   .peta-thumb{
-    height:130px;background:linear-gradient(135deg,var(--char),var(--panel-raised));
+    height:130px;overflow:hidden;background:linear-gradient(135deg,var(--char),var(--panel-raised));
     display:flex;align-items:center;justify-content:center;color:var(--ash);font-size:12px;
     font-family:'JetBrains Mono',monospace;
   }
+  .peta-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
   .peta-body{padding:16px 18px;flex:1;display:flex;flex-direction:column;gap:10px;}
   .peta-body h4{font-family:'Barlow Condensed',sans-serif;font-size:16px;text-transform:uppercase;letter-spacing:.02em;}
   .peta-body p{font-size:12.5px;color:var(--ash);flex:1;margin:0;}
@@ -212,11 +225,16 @@
   }
 
   /* ---------- STATISTIK ---------- */
-  #stats-grid{display:flex;flex-direction:column;gap:14px;max-width:720px;}
-  .stat-item .stat-top{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px;}
-  .stat-item .stat-top .stat-val{font-family:'JetBrains Mono',monospace;color:var(--text);}
+  #stats-grid, #village-stats{display:flex;flex-direction:column;gap:14px;max-width:720px;}
+  .stat-item .stat-top{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px;gap:12px;}
+  .stat-item .stat-top span:first-child{flex:1;}
+  .stat-item .stat-top .stat-val{font-family:'JetBrains Mono',monospace;color:var(--text);white-space:nowrap;}
   .bar-track{height:10px;background:var(--panel);border-radius:5px;overflow:hidden;border:1px solid var(--line);}
   .bar-fill{height:100%;width:0;border-radius:5px;transition:width 1.1s cubic-bezier(.2,.8,.2,1);}
+  .stats-subtitle{
+    font-family:'Barlow Condensed',sans-serif;font-size:20px;text-transform:uppercase;
+    letter-spacing:.01em;margin-bottom:14px;color:var(--text);
+  }
 
   /* ---------- MITIGASI ---------- */
   .mitigasi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
@@ -247,7 +265,10 @@
     .fakta-grid{grid-template-columns:repeat(2,1fr);}
     .peta-grid{grid-template-columns:1fr;}
     .mitigasi-grid{grid-template-columns:1fr;}
-    #map-panel{width:calc(100% - 32px);}
+    #map-panel-toggle{display:flex;}
+    #map-panel{display:none;width:calc(100% - 32px);}
+    #map-panel.open{display:block;}
+    #map-panel-close{display:block;}
   }
 </style>
 </head>
@@ -286,7 +307,7 @@
     <div class="reveal">
       <div class="eyebrow">Pendahuluan</div>
       <h2 class="section-title">Api yang Sama,<br>Berulang Kali</h2>
-      <p style="text-align:justify;">Setiap musim kemarau, asap karhutla kembali menyelimuti Kalimantan Tengah, dan seringkali, di lahan yang <b style="color:var(--text)">sama persis</b> dengan tahun-tahun sebelumnya. Lahan gambut yang pernah terbakar kehilangan tutupan vegetasi pelindungnya, muka air tanahnya terus turun, lalu ditumbuhi vegetasi sekunder yang justru lebih mudah terbakar, membentuk siklus degradasi yang sulit diputus tanpa intervensi tepat sasaran.</p>
+      <p style="text-align:justify;">Setiap musim kemarau, asap karhutla kembali menyelimuti Kalimantan Tengah, dan seringkali, di lahan yang <b style="color:var(--text)">sama</b> dengan tahun-tahun sebelumnya. Lahan gambut yang pernah terbakar kehilangan tutupan vegetasi pelindungnya, muka air tanahnya terus turun, lalu ditumbuhi vegetasi sekunder yang justru lebih mudah terbakar, membentuk siklus degradasi yang sulit diputus tanpa intervensi tepat sasaran.</p>
       <p style="text-align:justify;">Sistem pemantauan yang ada selama ini bersifat reaktif: mendeteksi titik api yang sedang terjadi. Situs ini menawarkan pendekatan berbeda, memetakan <b style="color:var(--text)">pola kekambuhan</b> dari data historis, sebagai dasar objektif untuk menentukan wilayah mana yang paling butuh restorasi lebih dulu.</p>
     </div>
   </div>
@@ -326,7 +347,9 @@
 
     <div id="peta-wrap">
       <div id="map"></div>
+      <button id="map-panel-toggle">&#9776; Layer</button>
       <div id="map-panel">
+        <button id="map-panel-close" aria-label="Tutup panel">&times;</button>
         <h3>Layer</h3>
         <div class="layer-toggle"><label>Batas Kabupaten</label><label class="switch"><input type="checkbox" id="toggle-boundary" checked><span class="slider"></span></label></div>
         <div class="layer-toggle"><label>Batas Desa</label><label class="switch"><input type="checkbox" id="toggle-desa"><span class="slider"></span></label></div>
@@ -344,6 +367,9 @@
         <div class="legend-row"><div class="legend-swatch" style="background:var(--safe)"></div>Aman</div>
         <div class="legend-row"><div class="legend-swatch" style="background:var(--warn)"></div>Pernah terbakar (1x)</div>
         <div class="legend-row"><div class="legend-swatch" style="background:var(--danger)"></div>Zona Kambuhan (&ge;2x)</div>
+
+        <h3>Legenda &mdash; Batas Desa</h3>
+        <div class="legend-row"><div class="legend-swatch" style="background:#1e3a8a"></div>Batas Desa</div>
 
         <h3>Legenda &mdash; Frekuensi</h3>
         <div class="legend-row"><div class="legend-swatch" style="background:#ffffff;border:1px solid var(--line)"></div>0 kali</div>
@@ -367,7 +393,7 @@
   <div class="wrap reveal">
     <div class="eyebrow">Unduh</div>
     <h2 class="section-title">Peta Layout Cetak</h2>
-    <p style="color:var(--ash);font-size:14.5px;max-width:640px;margin-bottom:26px;">Versi peta siap cetak (PDF/gambar) untuk lampiran laporan atau bahan presentasi.</p>
+    <p style="color:var(--ash);font-size:14.5px;max-width:640px;margin-bottom:26px;">Versi peta siap cetak (gambar) untuk lampiran laporan atau bahan presentasi.</p>
     <div class="peta-grid" id="peta-grid"></div>
   </div>
 </section>
@@ -380,6 +406,15 @@
       <div class="stat-item"><div class="stat-top"><span>Menghitung&hellip;</span></div></div>
     </div>
     <p style="color:var(--ash);font-size:12px;margin-top:18px;max-width:600px;">Dihitung berdasarkan geometri poligon hasil vektorisasi.</p>
+
+    <div style="margin-top:48px;">
+      <div class="eyebrow">Analisis Desa</div>
+      <h3 class="stats-subtitle">Desa dengan Zona Kambuhan Tertinggi</h3>
+      <div id="village-stats">
+        <div class="stat-item"><div class="stat-top"><span>Menghitung&hellip;</span></div></div>
+      </div>
+      <p style="color:var(--ash);font-size:12px;margin-top:18px;max-width:600px;">Persentase dihitung dari luas wilayah tiap desa yang termasuk kategori Zona Kambuhan (&ge;2 kali terbakar) terhadap luas total desa tersebut.</p>
+    </div>
   </div>
 </section>
 
@@ -465,6 +500,29 @@
   document.querySelectorAll('.reveal').forEach(function(el) { revealObserver.observe(el); });
 
   // ============================================================
+  // PANEL LAYER: buka/tutup di layar kecil (mobile)
+  // ============================================================
+  var mapPanelEl = document.getElementById('map-panel');
+  var panelToggleEl = document.getElementById('map-panel-toggle');
+  var panelCloseEl = document.getElementById('map-panel-close');
+
+  panelToggleEl.addEventListener('click', function() {
+    mapPanelEl.classList.add('open');
+    panelToggleEl.style.display = 'none';
+  });
+  panelCloseEl.addEventListener('click', function() {
+    mapPanelEl.classList.remove('open');
+    if (window.innerWidth <= 900) panelToggleEl.style.display = 'flex';
+  });
+  window.addEventListener('resize', function() {
+    if (window.innerWidth > 900) {
+      panelToggleEl.style.display = 'none';
+    } else if (!mapPanelEl.classList.contains('open')) {
+      panelToggleEl.style.display = 'flex';
+    }
+  });
+
+  // ============================================================
   // KONFIGURASI DATA
   // ============================================================
   // Taruh file-file ini di folder data/ (nama harus persis, atau ubah
@@ -474,18 +532,18 @@
   var ZONES_PATH     = 'data/PulangPisau_RecurrenceZone_Vector.geojson';
   var FREQ_RASTER_PATH = 'data/raster/PulangPisau_FireFrequency_2019_2025_web.tif';
 
-  // Daftar peta layout yang bisa diunduh. Taruh file PDF/PNG-nya di folder
-  // data/peta/ dengan nama file PERSIS seperti di bawah.
+  // Daftar peta layout yang bisa diunduh (thumbnail diambil dari file yang sama).
+  // Taruh file gambarnya di folder data/peta/ dengan nama file PERSIS seperti di bawah.
   var PETA_LAYOUTS = [
-    { title: 'Zona Kambuhan Kebakaran', desc: 'Peta utama: klasifikasi Aman, Pernah Terbakar, dan Zona Kambuhan periode 2019\u20132025.', filename: 'peta_zona_kambuhan.pdf' },
-    { title: 'Frekuensi Kebakaran', desc: 'Jumlah kejadian terbakar per lokasi selama periode 2019\u20132025 (skala 0\u20136 kali).', filename: 'peta_frekuensi_kebakaran.pdf' },
-    { title: 'NBR Tahun 2019', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2019.', filename: 'peta_nbr_2019.pdf' },
-    { title: 'NBR Tahun 2020', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2020.', filename: 'peta_nbr_2020.pdf' },
-    { title: 'NBR Tahun 2021', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2021.', filename: 'peta_nbr_2021.pdf' },
-    { title: 'NBR Tahun 2022', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2022.', filename: 'peta_nbr_2022.pdf' },
-    { title: 'NBR Tahun 2023', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2023.', filename: 'peta_nbr_2023.pdf' },
-    { title: 'NBR Tahun 2024', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2024.', filename: 'peta_nbr_2024.pdf' },
-    { title: 'NBR Tahun 2025', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2025.', filename: 'peta_nbr_2025.pdf' }
+    { title: 'Zona Kambuhan Kebakaran', desc: 'Peta utama: klasifikasi Aman, Pernah Terbakar, dan Zona Kambuhan periode 2019\u20132025.', filename: 'ZONA KAMBUHAN.jpg' },
+    { title: 'Frekuensi Kebakaran', desc: 'Jumlah kejadian terbakar per lokasi selama periode 2019\u20132025 (skala 0\u20136 kali).', filename: 'FREKUENSI KEBAKARAN.jpg' },
+    { title: 'NBR Tahun 2019', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2019.', filename: 'NBR2019.jpg' },
+    { title: 'NBR Tahun 2020', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2020.', filename: 'NBR2020.jpg' },
+    { title: 'NBR Tahun 2021', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2021.', filename: 'NBR2021.jpg' },
+    { title: 'NBR Tahun 2022', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2022.', filename: 'NBR2022.jpg' },
+    { title: 'NBR Tahun 2023', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2023.', filename: 'NBR2023.jpg' },
+    { title: 'NBR Tahun 2024', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2024.', filename: 'NBR2024.jpg' },
+    { title: 'NBR Tahun 2025', desc: 'Kondisi vegetasi/gambut hasil analisis Normalized Burn Ratio, musim kemarau 2025.', filename: 'NBR2025.jpg' }
   ];
 
   var COLORS = { 0: '#4c9a5b', 1: '#e0a83f', 2: '#c1432e' };
@@ -523,6 +581,10 @@
   var zonesLayer = L.layerGroup().addTo(map);
   var statusEl = document.getElementById('status-msg');
 
+  // Disimpan supaya bisa dipakai bareng untuk analisis statistik per desa
+  var desaGeojsonData = null;
+  var zonesGeojsonData = null;
+
   function showStatus(msg) {
     statusEl.textContent = msg;
     statusEl.style.display = 'block';
@@ -539,12 +601,14 @@
     .then(function(r) { if (!r.ok) throw new Error('not found'); return r.json(); })
     .then(function(geojson) {
       L.geoJSON(geojson, {
-        style: { color: '#ff8a3d', weight: 1, fillOpacity: 0.02, fillColor: '#ff8a3d', dashArray: '2 3' },
+        style: { color: '#1e3a8a', weight: 1.6, fillOpacity: 0, dashArray: '2 3' },
         onEachFeature: function(feature, lyr) {
           var nameProp = feature.properties.NAMOBJ || feature.properties.nama_desa || feature.properties.name || 'Desa';
           lyr.bindTooltip(nameProp, { sticky: true });
         }
       }).addTo(desaLayer);
+      desaGeojsonData = geojson;
+      computeVillageStats();
     })
     .catch(function() { showStatus('Belum ketemu data/' + DESA_PATH.split('/').pop() + '.'); });
 
@@ -566,6 +630,8 @@
       }).addTo(zonesLayer);
       if (geojson.features && geojson.features.length) map.fitBounds(layer.getBounds(), { padding: [20, 20] });
       computeStats(geojson);
+      zonesGeojsonData = geojson;
+      computeVillageStats();
     })
     .catch(function() {
       showStatus('Belum ketemu data/PulangPisau_RecurrenceZone_Vector.geojson.');
@@ -596,7 +662,10 @@
           georaster: georaster, opacity: 0.75, resolution: 256,
           pixelValuesToColorFn: function(values) {
             var v = values[0];
-            if (v === null || v === undefined || isNaN(v)) return null;
+            // Piksel di luar batas kajian (air/luar AOI) diberi sentinel -1 saat
+            // export dari GEE -- HARUS dilewati (return null), jangan digambar,
+            // supaya raster tidak tampil sebagai kotak putih menutupi peta dasar.
+            if (v === null || v === undefined || isNaN(v) || v < 0) return null;
             var idx = Math.min(Math.max(Math.round(v), 0), freqColorRamp.length - 1);
             return freqColorRamp[idx];
           }
@@ -683,7 +752,7 @@
   });
 
   // ============================================================
-  // STATISTIK (bar chart sederhana)
+  // STATISTIK (bar chart sederhana) -- luas per kategori zona kambuhan
   // ============================================================
   function computeStats(geojson) {
     var totals = { 0: 0, 1: 0, 2: 0 };
@@ -704,10 +773,70 @@
         '<div class="bar-track"><div class="bar-fill" style="background:' + COLORS[cls] + '" data-pct="' + pct + '"></div></div>';
       container.appendChild(item);
     });
-    // animate bars in after paint
+    animateBars(container);
+  }
+
+  // ============================================================
+  // STATISTIK PER DESA -- persentase luas Zona Kambuhan (>=2x) per desa
+  // ============================================================
+  function computeVillageStats() {
+    if (!desaGeojsonData || !zonesGeojsonData) return; // tunggu keduanya siap
+
+    var kambuhanZones = zonesGeojsonData.features.filter(function(f) {
+      return f.properties.recurrence_class === 2;
+    });
+
+    var results = [];
+    desaGeojsonData.features.forEach(function(desa) {
+      var name = desa.properties.NAMOBJ || desa.properties.nama_desa || desa.properties.name || 'Desa';
+      var desaArea = 0;
+      try { desaArea = turf.area(desa); } catch (e) { return; }
+      if (!desaArea) return;
+
+      var kambuhanArea = 0;
+      kambuhanZones.forEach(function(zone) {
+        try {
+          if (!turf.booleanIntersects(desa, zone)) return;
+          var inter = turf.intersect(desa, zone);
+          if (inter) kambuhanArea += turf.area(inter);
+        } catch (e) {
+          // lewati pasangan geometri yang gagal di-intersect (mis. self-intersection)
+        }
+      });
+
+      results.push({
+        name: name,
+        pct: (kambuhanArea / desaArea) * 100,
+        area_km2: kambuhanArea / 1e6
+      });
+    });
+
+    results.sort(function(a, b) { return b.pct - a.pct; });
+    renderVillageStats(results.slice(0, 8));
+  }
+
+  function renderVillageStats(list) {
+    var wrap = document.getElementById('village-stats');
+    wrap.innerHTML = '';
+    if (!list.length) {
+      wrap.innerHTML = '<p style="font-size:12.5px;color:var(--ash)">Data desa belum tersedia.</p>';
+      return;
+    }
+    list.forEach(function(item) {
+      var row = document.createElement('div');
+      row.className = 'stat-item';
+      row.innerHTML =
+        '<div class="stat-top"><span>' + item.name + '</span><span class="stat-val">' + item.pct.toFixed(1) + '% (' + item.area_km2.toFixed(2) + ' km&sup2;)</span></div>' +
+        '<div class="bar-track"><div class="bar-fill" style="background:var(--danger)" data-pct="' + item.pct + '"></div></div>';
+      wrap.appendChild(row);
+    });
+    animateBars(wrap);
+  }
+
+  function animateBars(container) {
     requestAnimationFrame(function() {
       setTimeout(function() {
-        document.querySelectorAll('.bar-fill').forEach(function(bar) {
+        container.querySelectorAll('.bar-fill').forEach(function(bar) {
           bar.style.width = bar.getAttribute('data-pct') + '%';
         });
       }, 100);
@@ -715,19 +844,29 @@
   }
 
   // ============================================================
-  // UNDUH PETA (data-driven dari PETA_LAYOUTS)
+  // UNDUH PETA (data-driven dari PETA_LAYOUTS, thumbnail = gambar aslinya)
   // ============================================================
+  function handleThumbError(img, ext) {
+    img.onerror = null;
+    var span = document.createElement('span');
+    span.textContent = ext;
+    span.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ash);";
+    img.replaceWith(span);
+  }
+
   var petaGrid = document.getElementById('peta-grid');
   if (PETA_LAYOUTS.length === 0) {
     petaGrid.innerHTML = '<div class="peta-empty">Peta layout belum ditambahkan &mdash; taruh file di <code>data/peta/</code> lalu isi daftar <code>PETA_LAYOUTS</code> di script.</div>';
   } else {
     PETA_LAYOUTS.forEach(function(p) {
+      var ext = p.filename.split('.').pop().toUpperCase();
+      var filePath = 'data/peta/' + encodeURIComponent(p.filename);
       var card = document.createElement('div');
       card.className = 'peta-card';
       card.innerHTML =
-        '<div class="peta-thumb">' + p.filename.split('.').pop().toUpperCase() + '</div>' +
+        '<div class="peta-thumb"><img src="' + filePath + '" alt="' + p.title + '" loading="lazy" onerror="handleThumbError(this,\'' + ext + '\')"></div>' +
         '<div class="peta-body"><h4>' + p.title + '</h4><p>' + p.desc + '</p>' +
-        '<a class="btn-download" href="data/peta/' + p.filename + '" download>Unduh</a></div>';
+        '<a class="btn-download" href="' + filePath + '" download="' + p.filename + '">Unduh</a></div>';
       petaGrid.appendChild(card);
     });
   }
