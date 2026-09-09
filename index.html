@@ -295,7 +295,12 @@
     .mitigasi-grid{grid-template-columns:1fr;}
     #map-panel-toggle{display:flex;}
     #map-panel{display:none;width:calc(100% - 32px);}
-    #map-panel.open{display:block;}
+    /* PENTING: harus "flex" (bukan "block") supaya struktur header-tetap +
+       body-scrollable (#map-panel-header / #map-panel-body) tetap berfungsi
+       saat panel dibuka di layar sempit -- kalau "block", flex:1/min-height:0
+       pada body jadi tidak berlaku, sehingga isi panel (mis. Legenda NBR)
+       kepotong overflow:hidden tanpa bisa di-scroll. */
+    #map-panel.open{display:flex;}
     #map-panel-close{display:block;}
   }
 </style>
@@ -811,7 +816,10 @@
         for (var row = 0; row < georaster.height; row++) {
           var rowArr = band[row], base = row * georaster.width;
           for (var col = 0; col < georaster.width; col++) {
-            if (mask[base + col] === 0) rowArr[col] = -1;
+            // -9999 dipakai sebagai sentinel nodata: jelas di luar rentang
+            // valid Frekuensi (0-6) maupun NBR (-1..1), jadi tidak akan
+            // tertukar dengan nilai data asli di kedua layer.
+            if (mask[base + col] === 0) rowArr[col] = -9999;
           }
         }
       }
@@ -873,7 +881,11 @@
     [0.8,  [0, 100, 0]]      // hijau tua -- vegetasi sehat
   ];
   function nbrValueToColor(v) {
-    if (v === null || v === undefined || isNaN(v)) return null;
+    // Nilai jauh di luar rentang valid NBR (-1..1) adalah sentinel nodata dari
+    // clipGeorasterToBoundary (area luar AOI) -- HARUS disembunyikan (null),
+    // bukan diekstrapolasi ke ujung skala warna (itu penyebab munculnya warna
+    // merah/coklat menutupi area luar AOI).
+    if (v === null || v === undefined || isNaN(v) || v < -1.5 || v > 1.5) return null;
     for (var i = 0; i < nbrColorRamp.length - 1; i++) {
       var a = nbrColorRamp[i], b = nbrColorRamp[i + 1];
       if (v >= a[0] && v <= b[0]) {
