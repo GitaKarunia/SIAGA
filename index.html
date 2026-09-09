@@ -186,6 +186,20 @@
     letter-spacing:.03em;color:var(--ember-1);margin:14px 0 8px;
   }
   #map-panel-body h3:first-child{margin-top:0;}
+  /* Basemap switch (Peta/Satelit) dipindah ke dalam panel kita sendiri --
+     sebelumnya ini kontrol bawaan Leaflet di pojok kanan-atas peta, yang
+     di layar sempit malah numpuk persis di atas tombol tutup panel. */
+  .basemap-switch{display:flex;gap:6px;margin-bottom:14px;}
+  .basemap-btn{
+    flex:1;font-family:'Barlow Condensed',sans-serif;font-size:12.5px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.02em;color:var(--ash);
+    background:var(--panel-raised);border:1px solid var(--line);border-radius:5px;
+    padding:7px 0;cursor:pointer;transition:background .15s,color .15s;
+  }
+  .basemap-btn.active{
+    background:linear-gradient(90deg,var(--ember-1),var(--ember-2));
+    color:var(--black);border-color:transparent;
+  }
   .layer-toggle{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);}
   .layer-toggle:last-child{border-bottom:none;}
   .layer-toggle label{font-size:12.5px;}
@@ -368,6 +382,10 @@
           <button id="map-panel-close" aria-label="Tutup panel">&times;</button>
         </div>
         <div id="map-panel-body">
+        <div class="basemap-switch" role="group" aria-label="Pilih peta dasar">
+          <button type="button" class="basemap-btn active" data-basemap="streets">Peta</button>
+          <button type="button" class="basemap-btn" data-basemap="satellite">Satelit</button>
+        </div>
         <div class="layer-toggle"><label>Batas Kabupaten</label><label class="switch"><input type="checkbox" id="toggle-boundary" checked><span class="slider"></span></label></div>
         <div class="layer-toggle"><label>Batas Desa</label><label class="switch"><input type="checkbox" id="toggle-desa"><span class="slider"></span></label></div>
         <div class="layer-toggle"><label>Zona Kambuhan</label><label class="switch"><input type="checkbox" id="toggle-zones" checked><span class="slider"></span></label></div>
@@ -588,11 +606,23 @@
     maxZoom: 18
   });
 
-  L.control.layers(
-    { 'Peta': baseStreets, 'Satelit': baseSatellite },
-    null,
-    { position: 'topright', collapsed: true }
-  ).addTo(map);
+  // Kontrol basemap bawaan Leaflet (L.control.layers) sengaja TIDAK dipakai --
+  // di layar sempit posisinya (topright) numpuk di atas tombol tutup panel
+  // kita sendiri, bikin dua kontrol saling menutupi dan tidak bisa ditutup.
+  // Diganti dengan tombol Peta/Satelit di dalam panel #map-panel-body.
+  document.querySelectorAll('.basemap-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.basemap-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      if (btn.dataset.basemap === 'satellite') {
+        if (map.hasLayer(baseStreets)) map.removeLayer(baseStreets);
+        if (!map.hasLayer(baseSatellite)) baseSatellite.addTo(map);
+      } else {
+        if (map.hasLayer(baseSatellite)) map.removeLayer(baseSatellite);
+        if (!map.hasLayer(baseStreets)) baseStreets.addTo(map);
+      }
+    });
+  });
 
   var boundaryLayer = L.layerGroup().addTo(map);
   var desaLayer = L.layerGroup();
@@ -681,6 +711,56 @@
 
   var freqColorRamp = ['#ffffff', '#ffffb2', '#fecc5c', '#fd8d3c', '#f03b20', '#bd0026'];
   var freqRasterLayer = null, freqLoading = false;
+
+  // ------------------------------------------------------------
+  // MASK VISUAL SESUAI BENTUK BATAS KABUPATEN (bukan kotak)
+  // ------------------------------------------------------------
+  // Raster (frekuensi/NBR) selalu berbentuk persegi panjang (bounding box)
+  // karena itu format GeoTIFF. Sentinel nodata (-1) di dalam raster hanya
+  // menyembunyikan pikselnya, TAPI area di luar Pulang Pisau yang masih ada
+  // datanya (mis. kabupaten tetangga yang ikut ter-cover raster) akan tetap
+  // tergambar. turf.mask() membuat poligon "seluruh dunia dikurangi bentuk
+  // batas kabupaten" -- lalu poligon itu kita gambar sebagai lapisan gelap
+  // di ATAS raster, sehingga yang terlihat cuma area yang benar-benar di
+  // dalam AOI, mengikuti bentuk asli batasnya (bukan kotak).
+  var boundaryMaskLayer = null;
+  function getBoundaryMaskLayer(callback) {
+    if (boundaryMaskLayer) { callback(boundaryMaskLayer); return; }
+    withBoundary(function(boundary) {
+      if (!boundary) { callback(null); return; }
+      try {
+        var feat = boundary.type === 'FeatureCollection' ? boundary.features[0] : boundary;
+        var maskPoly = turf.mask(feat);
+        var maskColor = getComputedStyle(document.documentElement).getPropertyValue('--char').trim() || '#140d0a';
+        boundaryMaskLayer = L.geoJSON(maskPoly, {
+          interactive: false,
+          style: { stroke: false, fillColor: maskColor, fillOpacity: 0.94 }
+        });
+      } catch (e) {
+        boundaryMaskLayer = null;
+      }
+      callback(boundaryMaskLayer);
+    });
+  }
+  function bringVectorLayersToFront() {
+    [boundaryLayer, desaLayer, zonesLayer].forEach(function(group) {
+      if (map.hasLayer(group)) group.eachLayer(function(l) { if (l.bringToFront) l.bringToFront(); });
+    });
+  }
+  function showAoiMask() {
+    getBoundaryMaskLayer(function(maskLayer) {
+      if (maskLayer && !map.hasLayer(maskLayer)) maskLayer.addTo(map);
+      bringVectorLayersToFront();
+    });
+  }
+  function hideAoiMaskIfUnused() {
+    var freqOn = document.getElementById('toggle-freq').checked;
+    var nbrOn = document.getElementById('toggle-nbr').checked;
+    if (!freqOn && !nbrOn && boundaryMaskLayer && map.hasLayer(boundaryMaskLayer)) {
+      map.removeLayer(boundaryMaskLayer);
+    }
+  }
+
   function loadFreqRaster(onReady) {
     if (freqRasterLayer) { onReady(freqRasterLayer); return; }
     if (freqLoading) return;
@@ -689,26 +769,21 @@
       .then(function(r) { if (!r.ok) throw new Error('not found'); return r.arrayBuffer(); })
       .then(function(buffer) { return parseGeoraster(buffer); })
       .then(function(georaster) {
-        withBoundary(function(boundary) {
-          freqRasterLayer = new GeoRasterLayer({
-            georaster: georaster, opacity: 0.75, resolution: 256,
-            // "mask" meng-clip raster mengikuti bentuk poligon batas kabupaten,
-            // jadi bagian di luar batas tidak lagi tampil sebagai kotak.
-            mask: boundary || undefined,
-            mask_strategy: 'inside',
-            pixelValuesToColorFn: function(values) {
-              var v = values[0];
-              // Piksel di luar batas kajian (air/luar AOI) diberi sentinel -1 saat
-              // export dari GEE -- HARUS dilewati (return null), jangan digambar,
-              // supaya raster tidak tampil sebagai kotak putih menutupi peta dasar.
-              if (v === null || v === undefined || isNaN(v) || v < 0) return null;
-              var idx = Math.min(Math.max(Math.round(v), 0), freqColorRamp.length - 1);
-              return freqColorRamp[idx];
-            }
-          });
-          freqLoading = false;
-          onReady(freqRasterLayer);
+        freqRasterLayer = new GeoRasterLayer({
+          georaster: georaster, opacity: 0.75, resolution: 256,
+          pixelValuesToColorFn: function(values) {
+            var v = values[0];
+            // Piksel di luar batas kajian (air/luar AOI) diberi sentinel -1 saat
+            // export dari GEE -- HARUS dilewati (return null), jangan digambar.
+            // Bentuk AOI yang sebenarnya (bukan kotak) ditangani terpisah lewat
+            // boundaryMaskLayer (lihat getBoundaryMaskLayer di bawah).
+            if (v === null || v === undefined || isNaN(v) || v < 0) return null;
+            var idx = Math.min(Math.max(Math.round(v), 0), freqColorRamp.length - 1);
+            return freqColorRamp[idx];
+          }
         });
+        freqLoading = false;
+        onReady(freqRasterLayer);
       })
       .catch(function() {
         freqLoading = false;
@@ -717,8 +792,15 @@
       });
   }
   document.getElementById('toggle-freq').addEventListener('change', function(e) {
-    if (e.target.checked) loadFreqRaster(function(layer) { layer.addTo(map); });
-    else if (freqRasterLayer) map.removeLayer(freqRasterLayer);
+    if (e.target.checked) {
+      loadFreqRaster(function(layer) {
+        layer.addTo(map);
+        showAoiMask();
+      });
+    } else {
+      if (freqRasterLayer) map.removeLayer(freqRasterLayer);
+      hideAoiMaskIfUnused();
+    }
   });
 
   // --- NBR per tahun (raster GeoTIFF, dipilih pakai slider) ---
@@ -752,16 +834,12 @@
       .then(function(r) { if (!r.ok) throw new Error('not found'); return r.arrayBuffer(); })
       .then(function(buffer) { return parseGeoraster(buffer); })
       .then(function(georaster) {
-        withBoundary(function(boundary) {
-          var layer = new GeoRasterLayer({
-            georaster: georaster, opacity: 0.8, resolution: 256,
-            mask: boundary || undefined,
-            mask_strategy: 'inside',
-            pixelValuesToColorFn: function(values) { return nbrValueToColor(values[0]); }
-          });
-          nbrCache[year] = layer;
-          onReady(layer);
+        var layer = new GeoRasterLayer({
+          georaster: georaster, opacity: 0.8, resolution: 256,
+          pixelValuesToColorFn: function(values) { return nbrValueToColor(values[0]); }
         });
+        nbrCache[year] = layer;
+        onReady(layer);
       })
       .catch(function() {
         showStatus('Belum ketemu data/raster/PulangPisau_NBR_' + year + '_web.tif.');
@@ -773,7 +851,10 @@
     loadNbrYear(year, function(layer) {
       if (currentNbrLayer) map.removeLayer(currentNbrLayer);
       currentNbrLayer = layer;
-      if (document.getElementById('toggle-nbr').checked) layer.addTo(map);
+      if (document.getElementById('toggle-nbr').checked) {
+        layer.addTo(map);
+        showAoiMask();
+      }
     });
   }
 
@@ -786,6 +867,7 @@
       setNbrYear(document.getElementById('nbr-year-slider').value);
     } else if (currentNbrLayer) {
       map.removeLayer(currentNbrLayer);
+      hideAoiMaskIfUnused();
     }
   });
   document.getElementById('nbr-year-slider').addEventListener('input', function(e) {
