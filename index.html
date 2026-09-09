@@ -713,52 +713,113 @@
   var freqRasterLayer = null, freqLoading = false;
 
   // ------------------------------------------------------------
-  // MASK VISUAL SESUAI BENTUK BATAS KABUPATEN (bukan kotak)
+  // CLIP RASTER KE BENTUK ASLI BATAS KABUPATEN (bukan overlay gelap)
   // ------------------------------------------------------------
-  // Raster (frekuensi/NBR) selalu berbentuk persegi panjang (bounding box)
-  // karena itu format GeoTIFF. Sentinel nodata (-1) di dalam raster hanya
-  // menyembunyikan pikselnya, TAPI area di luar Pulang Pisau yang masih ada
-  // datanya (mis. kabupaten tetangga yang ikut ter-cover raster) akan tetap
-  // tergambar. turf.mask() membuat poligon "seluruh dunia dikurangi bentuk
-  // batas kabupaten" -- lalu poligon itu kita gambar sebagai lapisan gelap
-  // di ATAS raster, sehingga yang terlihat cuma area yang benar-benar di
-  // dalam AOI, mengikuti bentuk asli batasnya (bukan kotak).
-  var boundaryMaskLayer = null;
-  function getBoundaryMaskLayer(callback) {
-    if (boundaryMaskLayer) { callback(boundaryMaskLayer); return; }
-    withBoundary(function(boundary) {
-      if (!boundary) { callback(null); return; }
-      try {
-        var feat = boundary.type === 'FeatureCollection' ? boundary.features[0] : boundary;
-        var maskPoly = turf.mask(feat);
-        var maskColor = getComputedStyle(document.documentElement).getPropertyValue('--char').trim() || '#140d0a';
-        boundaryMaskLayer = L.geoJSON(maskPoly, {
-          interactive: false,
-          style: { stroke: false, fillColor: maskColor, fillOpacity: 0.94 }
-        });
-      } catch (e) {
-        boundaryMaskLayer = null;
-      }
-      callback(boundaryMaskLayer);
-    });
-  }
-  function bringVectorLayersToFront() {
-    [boundaryLayer, desaLayer, zonesLayer].forEach(function(group) {
-      if (map.hasLayer(group)) group.eachLayer(function(l) { if (l.bringToFront) l.bringToFront(); });
-    });
-  }
-  function showAoiMask() {
-    getBoundaryMaskLayer(function(maskLayer) {
-      if (maskLayer && !map.hasLayer(maskLayer)) maskLayer.addTo(map);
-      bringVectorLayersToFront();
-    });
-  }
-  function hideAoiMaskIfUnused() {
-    var freqOn = document.getElementById('toggle-freq').checked;
-    var nbrOn = document.getElementById('toggle-nbr').checked;
-    if (!freqOn && !nbrOn && boundaryMaskLayer && map.hasLayer(boundaryMaskLayer)) {
-      map.removeLayer(boundaryMaskLayer);
+  // Raster (frekuensi/NBR) selalu berbentuk persegi panjang karena format
+  // GeoTIFF. Daripada menutup area luar AOI dengan lapisan warna (itu bikin
+  // basemap ikut gelap), di sini kita langsung MENGUBAH DATA piksel georaster
+  // sebelum digambar: piksel yang jatuh di luar poligon batas kabupaten
+  // ditulis ulang jadi nodata (-1), memakai sentinel yang sama seperti yang
+  // sudah dipakai pixelValuesToColorFn (v < 0 => tidak digambar). Hasilnya
+  // raster tampil pas mengikuti bentuk AOI, dan basemap di luar AOI tidak
+  // tersentuh sama sekali.
+  function projectLngLatToRasterXY(lng, lat, georaster) {
+    var proj = georaster.projection;
+    if (proj === 3857 || proj === 900913) {
+      var R = 6378137;
+      return [
+        lng * Math.PI / 180 * R,
+        Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2)) * R
+      ];
     }
+    // Default: anggap raster sudah dalam WGS84 (EPSG:4326), umum untuk
+    // export GeoTIFF dari Google Earth Engine yang dipakai bersama
+    // georaster-layer-for-leaflet.
+    return [lng, lat];
+  }
+
+  function projectLngLatToPixel(lng, lat, georaster) {
+    var xy = projectLngLatToRasterXY(lng, lat, georaster);
+    return [
+      (xy[0] - georaster.xmin) / georaster.pixelWidth,
+      (georaster.ymax - xy[1]) / georaster.pixelHeight
+    ];
+  }
+
+  function boundaryToPixelPolygons(boundaryGeojson, georaster) {
+    var polygons = [];
+    var features = boundaryGeojson.type === 'FeatureCollection' ? boundaryGeojson.features
+      : (boundaryGeojson.type === 'Feature' ? [boundaryGeojson] : [{ geometry: boundaryGeojson }]);
+    function ringToPixels(ring) {
+      return ring.map(function(pt) { return projectLngLatToPixel(pt[0], pt[1], georaster); });
+    }
+    features.forEach(function(f) {
+      var geom = f.geometry || f;
+      if (!geom) return;
+      if (geom.type === 'Polygon') {
+        polygons.push(geom.coordinates.map(ringToPixels));
+      } else if (geom.type === 'MultiPolygon') {
+        geom.coordinates.forEach(function(poly) { polygons.push(poly.map(ringToPixels)); });
+      }
+    });
+    return polygons;
+  }
+
+  // Rasterisasi poligon (dalam koordinat piksel) jadi grid boolean pakai
+  // algoritma scanline (even-odd rule) -- jauh lebih cepat daripada
+  // turf.booleanPointInPolygon per piksel untuk raster berukuran besar.
+  function rasterizePolygonMask(width, height, polygons) {
+    var mask = new Uint8Array(width * height);
+    var edges = [];
+    polygons.forEach(function(rings) {
+      rings.forEach(function(ring) {
+        for (var i = 0; i < ring.length; i++) {
+          var p1 = ring[i], p2 = ring[(i + 1) % ring.length];
+          if (p1[1] === p2[1]) continue; // lewati sisi horizontal
+          edges.push({ x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] });
+        }
+      });
+    });
+    for (var row = 0; row < height; row++) {
+      var y = row + 0.5;
+      var xs = [];
+      for (var e = 0; e < edges.length; e++) {
+        var edge = edges[e];
+        var ymin = Math.min(edge.y1, edge.y2), ymax = Math.max(edge.y1, edge.y2);
+        if (y < ymin || y >= ymax) continue; // interval setengah-terbuka, hindari dobel hitung di titik sudut
+        var t = (y - edge.y1) / (edge.y2 - edge.y1);
+        xs.push(edge.x1 + t * (edge.x2 - edge.x1));
+      }
+      xs.sort(function(a, b) { return a - b; });
+      for (var i = 0; i + 1 < xs.length; i += 2) {
+        var colStart = Math.max(0, Math.round(xs[i]));
+        var colEnd = Math.min(width - 1, Math.round(xs[i + 1]) - 1);
+        for (var col = colStart; col <= colEnd; col++) mask[row * width + col] = 1;
+      }
+    }
+    return mask;
+  }
+
+  function clipGeorasterToBoundary(georaster, boundaryGeojson) {
+    if (!boundaryGeojson) return georaster; // tanpa data boundary, tampilkan apa adanya
+    try {
+      var polygons = boundaryToPixelPolygons(boundaryGeojson, georaster);
+      if (!polygons.length) return georaster;
+      var mask = rasterizePolygonMask(georaster.width, georaster.height, polygons);
+      for (var b = 0; b < georaster.values.length; b++) {
+        var band = georaster.values[b];
+        for (var row = 0; row < georaster.height; row++) {
+          var rowArr = band[row], base = row * georaster.width;
+          for (var col = 0; col < georaster.width; col++) {
+            if (mask[base + col] === 0) rowArr[col] = -1;
+          }
+        }
+      }
+    } catch (e) {
+      // kalau gagal (mis. proyeksi tidak dikenali), biarkan raster tanpa clip
+      // daripada raster tidak muncul sama sekali
+    }
+    return georaster;
   }
 
   function loadFreqRaster(onReady) {
@@ -769,21 +830,24 @@
       .then(function(r) { if (!r.ok) throw new Error('not found'); return r.arrayBuffer(); })
       .then(function(buffer) { return parseGeoraster(buffer); })
       .then(function(georaster) {
-        freqRasterLayer = new GeoRasterLayer({
-          georaster: georaster, opacity: 0.75, resolution: 256,
-          pixelValuesToColorFn: function(values) {
-            var v = values[0];
-            // Piksel di luar batas kajian (air/luar AOI) diberi sentinel -1 saat
-            // export dari GEE -- HARUS dilewati (return null), jangan digambar.
-            // Bentuk AOI yang sebenarnya (bukan kotak) ditangani terpisah lewat
-            // boundaryMaskLayer (lihat getBoundaryMaskLayer di bawah).
-            if (v === null || v === undefined || isNaN(v) || v < 0) return null;
-            var idx = Math.min(Math.max(Math.round(v), 0), freqColorRamp.length - 1);
-            return freqColorRamp[idx];
-          }
+        withBoundary(function(boundary) {
+          clipGeorasterToBoundary(georaster, boundary);
+          freqRasterLayer = new GeoRasterLayer({
+            georaster: georaster, opacity: 0.75, resolution: 256,
+            pixelValuesToColorFn: function(values) {
+              var v = values[0];
+              // Piksel di luar batas kajian (air/luar AOI, atau sudah di-clip
+              // ke -1 oleh clipGeorasterToBoundary) HARUS dilewati (return
+              // null), jangan digambar, supaya raster tidak tampil sebagai
+              // kotak menutupi peta dasar.
+              if (v === null || v === undefined || isNaN(v) || v < 0) return null;
+              var idx = Math.min(Math.max(Math.round(v), 0), freqColorRamp.length - 1);
+              return freqColorRamp[idx];
+            }
+          });
+          freqLoading = false;
+          onReady(freqRasterLayer);
         });
-        freqLoading = false;
-        onReady(freqRasterLayer);
       })
       .catch(function() {
         freqLoading = false;
@@ -793,13 +857,9 @@
   }
   document.getElementById('toggle-freq').addEventListener('change', function(e) {
     if (e.target.checked) {
-      loadFreqRaster(function(layer) {
-        layer.addTo(map);
-        showAoiMask();
-      });
-    } else {
-      if (freqRasterLayer) map.removeLayer(freqRasterLayer);
-      hideAoiMaskIfUnused();
+      loadFreqRaster(function(layer) { layer.addTo(map); });
+    } else if (freqRasterLayer) {
+      map.removeLayer(freqRasterLayer);
     }
   });
 
@@ -834,12 +894,15 @@
       .then(function(r) { if (!r.ok) throw new Error('not found'); return r.arrayBuffer(); })
       .then(function(buffer) { return parseGeoraster(buffer); })
       .then(function(georaster) {
-        var layer = new GeoRasterLayer({
-          georaster: georaster, opacity: 0.8, resolution: 256,
-          pixelValuesToColorFn: function(values) { return nbrValueToColor(values[0]); }
+        withBoundary(function(boundary) {
+          clipGeorasterToBoundary(georaster, boundary);
+          var layer = new GeoRasterLayer({
+            georaster: georaster, opacity: 0.8, resolution: 256,
+            pixelValuesToColorFn: function(values) { return nbrValueToColor(values[0]); }
+          });
+          nbrCache[year] = layer;
+          onReady(layer);
         });
-        nbrCache[year] = layer;
-        onReady(layer);
       })
       .catch(function() {
         showStatus('Belum ketemu data/raster/PulangPisau_NBR_' + year + '_web.tif.');
@@ -851,10 +914,7 @@
     loadNbrYear(year, function(layer) {
       if (currentNbrLayer) map.removeLayer(currentNbrLayer);
       currentNbrLayer = layer;
-      if (document.getElementById('toggle-nbr').checked) {
-        layer.addTo(map);
-        showAoiMask();
-      }
+      if (document.getElementById('toggle-nbr').checked) layer.addTo(map);
     });
   }
 
@@ -867,7 +927,6 @@
       setNbrYear(document.getElementById('nbr-year-slider').value);
     } else if (currentNbrLayer) {
       map.removeLayer(currentNbrLayer);
-      hideAoiMaskIfUnused();
     }
   });
   document.getElementById('nbr-year-slider').addEventListener('input', function(e) {
